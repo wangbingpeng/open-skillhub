@@ -1,0 +1,338 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "darwin", "darwin-arm64", "rhel-openssl-1.1.x", "rhel-openssl-3.0.x", "debian-openssl-1.1.x", "debian-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// 用户角色枚举
+enum Role {
+  USER
+  EDITOR
+  ADMIN
+}
+
+// 技能状态枚举
+enum SkillStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+// 论坛帖子类型枚举
+enum PostType {
+  DISCUSSION
+  REQUEST
+}
+
+// 论坛帖子状态枚举
+enum PostStatus {
+  OPEN
+  CLOSED
+  RESOLVED
+}
+
+// 审计操作枚举
+enum AuditAction {
+  CREATE_POST
+  EDIT_POST
+  DELETE_POST
+  CREATE_REPLY
+  EDIT_REPLY
+  DELETE_REPLY
+  PIN_POST
+  CLOSE_POST
+  REOPEN_POST
+  CREATE_KNOWLEDGE_BASE
+  DELETE_KNOWLEDGE_BASE
+  DELETE_DOCUMENT
+}
+
+// 用户表
+model User {
+  id            String         @id @default(cuid())
+  username      String         @unique // 登录用户名
+  password      String // bcrypt 加密密码
+  email         String         @unique // 邮箱
+  name          String? // 显示昵称（可选）
+  avatar        String?
+  role          Role           @default(USER)
+  department    String?
+  bio           String? // 个人简介
+  skills        Skill[]
+  comments      Comment[]
+  favorites     Favorite[]
+  likes         Like[]
+  forumPosts    ForumPost[]    @relation("ForumPosts")
+  forumReplies  ForumReply[]   @relation("ForumReplies")
+  auditLogs       AuditLog[]       @relation("AuditLogs")
+  knowledgeBases  KnowledgeBase[]
+  documents       Document[]       @relation("UploadedDocuments")
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+// 技能表
+model Skill {
+  id           String         @id @default(cuid())
+  name         String         @unique
+  slug         String         @unique
+  description  String
+  content      String // Markdown 内容
+  installation String? // 安装和使用说明
+  version      String         @default("1.0.0")
+  category     Category       @relation(fields: [categoryId], references: [id])
+  categoryId   String
+  author       User           @relation(fields: [authorId], references: [id])
+  authorId     String
+  tags         Tag[]
+  status       SkillStatus    @default(DRAFT)
+  downloads    Int            @default(0)
+  views        Int            @default(0)
+  attachments  Attachment[]
+  comments     Comment[]
+  favorites    Favorite[]
+  likes        Like[]
+  versions     SkillVersion[]
+  forumPosts   ForumPost[]    @relation("SkillForumPosts")
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([categoryId])
+  @@index([authorId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// 分类表
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  icon      String?
+  order     Int      @default(0) // 排序权重
+  skills    Skill[]
+  createdAt DateTime @default(now())
+}
+
+// 标签表（多对多）
+model Tag {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  skills    Skill[]
+  createdAt DateTime @default(now())
+}
+
+// 版本历史
+model SkillVersion {
+  id        String   @id @default(cuid())
+  skill     Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  skillId   String
+  version   String
+  content   String
+  changelog String?
+  createdAt DateTime @default(now())
+
+  @@index([skillId])
+}
+
+// 附件表
+model Attachment {
+  id        String   @id @default(cuid())
+  skill     Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  skillId   String
+  filename  String // 原始文件名
+  filepath  String // 存储路径
+  size      Int // 文件大小（字节）
+  mimeType  String // MIME 类型
+  createdAt DateTime @default(now())
+
+  @@index([skillId])
+}
+
+// 评论表
+model Comment {
+  id        String    @id @default(cuid())
+  content   String
+  skill     Skill     @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  skillId   String
+  author    User      @relation(fields: [authorId], references: [id])
+  authorId  String
+  parentId  String? // 支持回复评论
+  parent    Comment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies   Comment[] @relation("CommentReplies")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([skillId])
+  @@index([authorId])
+}
+
+// 收藏表
+model Favorite {
+  id        String   @id @default(cuid())
+  skill     Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  skillId   String
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  createdAt DateTime @default(now())
+
+  @@unique([skillId, userId])
+}
+
+// 点赞表
+model Like {
+  id        String   @id @default(cuid())
+  skill     Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  skillId   String
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  createdAt DateTime @default(now())
+
+  @@unique([skillId, userId])
+}
+
+// 论坛帖子表
+model ForumPost {
+  id        String     @id @default(cuid())
+  title     String
+  content   String
+  type      PostType   @default(DISCUSSION)
+  slug      String     @unique
+  status    PostStatus @default(OPEN)
+  viewCount Int        @default(0)
+  pinned    Boolean    @default(false)
+  tags      String     @default("")  // 逗号分隔的标签字符串(SQLite 不支持数组)
+
+  authorId  String
+  author    User       @relation("ForumPosts", fields: [authorId], references: [id])
+
+  skillId   String?
+  skill     Skill?     @relation("SkillForumPosts", fields: [skillId], references: [id])
+
+  replies   ForumReply[]
+
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([authorId])
+  @@index([skillId])
+  @@index([status])
+  @@index([type])
+  @@index([pinned])
+  @@index([createdAt])
+}
+
+// 论坛回复表
+model ForumReply {
+  id        String      @id @default(cuid())
+  content   String
+  likeCount Int         @default(0)
+
+  authorId  String
+  author    User        @relation("ForumReplies", fields: [authorId], references: [id])
+
+  postId    String
+  post      ForumPost   @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  parentId  String?
+  parent    ForumReply? @relation("ReplyToReply", fields: [parentId], references: [id])
+  children  ForumReply[] @relation("ReplyToReply")
+
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([postId])
+  @@index([authorId])
+  @@index([parentId])
+  @@index([createdAt])
+}
+
+// 审计日志表
+model AuditLog {
+  id         String      @id @default(cuid())
+  action     AuditAction
+  targetType String      // "ForumPost" | "ForumReply"
+  targetId   String
+  detail     String?     // JSON string
+  ipAddress  String?
+
+  userId     String
+  user       User        @relation("AuditLogs", fields: [userId], references: [id])
+
+  createdAt  DateTime    @default(now())
+
+  @@index([userId])
+  @@index([targetType, targetId])
+  @@index([createdAt])
+}
+
+// 知识库可见性枚举
+enum KBVisibility {
+  PRIVATE
+  PUBLIC
+}
+
+// 文档状态枚举
+enum DocumentStatus {
+  PROCESSING
+  READY
+  FAILED
+}
+
+// 知识库表
+model KnowledgeBase {
+  id          String        @id @default(cuid())
+  name        String
+  slug        String        @unique
+  description String        @default("")
+  visibility  KBVisibility  @default(PRIVATE)
+  authorId    String
+  author      User          @relation(fields: [authorId], references: [id])
+  documents   Document[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([visibility])
+}
+
+// 文档表
+model Document {
+  id              String         @id @default(cuid())
+  filename        String
+  originalName    String
+  mimeType        String
+  size            Int
+  content         String         // 提取的文本全文
+  knowledgeBaseId String
+  knowledgeBase   KnowledgeBase  @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  uploaderId      String
+  uploader        User           @relation("UploadedDocuments", fields: [uploaderId], references: [id])
+  chunks          DocumentChunk[]
+  status          DocumentStatus @default(PROCESSING)
+  error           String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([uploaderId])
+}
+
+// 文档分块表
+model DocumentChunk {
+  id         String   @id @default(cuid())
+  content    String
+  chunkIndex Int
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  metadata   String   @default("{}") // 可存 source page 等元信息
+  createdAt  DateTime @default(now())
+}
